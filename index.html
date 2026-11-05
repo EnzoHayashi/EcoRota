@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rotas de coleta de lixo</title>
+<style>
+  :root {
+    --fundo: #eef1f3; --painel: #ffffff; --tinta: #1c2a33; --suave: #5d6b75;
+    --linha: #d5dce1; --ok: #4f8f6b; --coletar: #d4572a; --acento: #1f5f7a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fundo); color: var(--tinta);
+         font: 15px/1.5 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
+  header { padding: 20px 24px 8px; max-width: 1200px; margin: 0 auto; }
+  h1 { margin: 0; font-size: 1.5rem; }
+  header p { margin: 4px 0 0; color: var(--suave); max-width: 70ch; }
+  main { max-width: 1200px; margin: 0 auto; padding: 12px 24px 40px;
+         display: grid; gap: 16px; grid-template-columns: 1fr; }
+  @media (min-width: 960px) { main { grid-template-columns: 1.2fr 1fr; } .largo { grid-column: 1 / -1; } }
+  section { background: var(--painel); border: 1px solid var(--linha); border-radius: 6px; padding: 16px; }
+  h2 { margin: 0 0 10px; font-size: 1.05rem; }
+  svg { width: 100%; height: auto; display: block; background: #f7f9fa; border-radius: 4px; }
+  .legenda { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; color: var(--suave); font-size: .85rem; }
+  .legenda i { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+  label { display: block; font-weight: 600; margin-bottom: 4px; }
+  input[type=range] { width: 100%; accent-color: var(--acento); }
+  .botoes { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  button { font: inherit; padding: 8px 14px; border-radius: 4px; border: 1px solid var(--acento);
+           background: #fff; color: var(--acento); cursor: pointer; }
+  button.principal { background: var(--acento); color: #fff; }
+  button:hover { filter: brightness(.95); }
+  button:focus-visible, input:focus-visible { outline: 3px solid #f0b429; outline-offset: 2px; }
+  #aviso { min-height: 1.4em; margin-top: 10px; font-size: .9rem; color: var(--ok); }
+  #aviso.erro { color: var(--coletar); }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--linha); }
+  th { color: var(--suave); font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .economia { margin: 10px 0 0; font-weight: 600; color: var(--ok); }
+  ol { margin: 0; padding-left: 22px; }
+  ol li { padding: 2px 0; }
+  .barra { background: #e4e9ec; border-radius: 3px; height: 10px; width: 120px; display: inline-block; vertical-align: middle; }
+  .barra b { display: block; height: 100%; border-radius: 3px; background: var(--ok); }
+  .barra b.cheio { background: var(--coletar); }
+  .rolagem { overflow-x: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Coleta de lixo guiada pelo nível dos contêineres</h1>
+  <p>Os sensores informam quanto cada contêiner já encheu. O sistema monta a rota do dia só com os pontos
+     que precisam de coleta e compara com a rota fixa atual.</p>
+</header>
+
+<main>
+  <section aria-labelledby="t-mapa">
+    <h2 id="t-mapa">Mapa dos pontos de coleta</h2>
+    <svg id="mapa" viewBox="0 0 640 420" role="img" aria-label="Mapa com os contêineres e a rota otimizada"></svg>
+    <div class="legenda">
+      <span><i style="background:var(--coletar)"></i>Será coletado (numerado pela ordem de visita)</span>
+      <span><i style="background:var(--ok)"></i>Abaixo do limite, fica de fora</span>
+      <span>■ Garagem</span>
+    </div>
+  </section>
+
+  <section aria-labelledby="t-controle">
+    <h2 id="t-controle">Rota do dia</h2>
+    <label for="limite">Coletar contêineres com nível a partir de <span id="limiteValor">70%</span></label>
+    <input id="limite" type="range" min="10" max="95" step="5" value="70">
+
+    <div class="botoes">
+      <button id="btnExecutar" class="principal">Registrar execução da rota</button>
+      <button id="btnSimular">Simular novas leituras dos sensores</button>
+    </div>
+    <div id="aviso" role="status" aria-live="polite"></div>
+
+    <h2 style="margin-top:14px">Rota fixa x rota otimizada</h2>
+    <table id="resumo"></table>
+    <p class="economia" id="economia"></p>
+
+    <h2 style="margin-top:14px">Ordem de visita</h2>
+    <ol id="ordem"></ol>
+  </section>
+
+  <section class="largo" aria-labelledby="t-cont">
+    <h2 id="t-cont">Contêineres (última leitura de cada sensor)</h2>
+    <div class="rolagem"><table id="tabelaConteineres"></table></div>
+  </section>
+
+  <section class="largo" aria-labelledby="t-hist">
+    <h2 id="t-hist">Histórico de rotas executadas</h2>
+    <div class="rolagem"><table id="tabelaHistorico"></table></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let conteineres = [], plano = null;
+
+async function api(url, opcoes) {
+  const resp = await fetch(url, opcoes);
+  const dados = await resp.json();
+  if (!resp.ok) throw new Error(dados.erro || "Erro no servidor");
+  return dados;
+}
+
+function aviso(texto, erro = false) {
+  $("aviso").textContent = texto;
+  $("aviso").className = erro ? "erro" : "";
+}
+
+function formatarTempo(min) {
+  return min >= 60 ? Math.floor(min / 60) + " h " + (min % 60) + " min" : min + " min";
+}
+
+// ---- Carregar dados do backend e redesenhar a tela ----
+async function atualizar() {
+  const limite = $("limite").value;
+  $("limiteValor").textContent = limite + "%";
+  [conteineres, plano] = await Promise.all([
+    api("/api/conteineres"),
+    api("/api/plano?limite=" + limite),
+  ]);
+  desenharMapa();
+  desenharResumo();
+  desenharOrdem();
+  desenharConteineres();
+}
+
+async function carregarHistorico() {
+  const linhas = await api("/api/historico");
+  $("tabelaHistorico").innerHTML =
+    "<tr><th>Execução</th><th>Data</th><th>Início</th><th>Fim</th><th class='num'>Pontos</th>" +
+    "<th class='num'>Distância (km)</th><th class='num'>Combustível (L)</th><th class='num'>Coletado (kg)</th></tr>" +
+    linhas.map(l => `<tr><td>#${l.id_execucao} (rota ${l.id_rota})</td><td>${l.data}</td><td>${l.hora_inicio}</td>
+      <td>${l.hora_fim}</td><td class="num">${l.pontos}</td><td class="num">${l.distancia_km.toFixed(1)}</td>
+      <td class="num">${l.combustivel_l.toFixed(1)}</td><td class="num">${Math.round(l.volume_kg)}</td></tr>`).join("");
+}
+
+// ---- Mapa (SVG simples: latitude/longitude viram x/y) ----
+function desenharMapa() {
+  const L = 640, A = 420, margem = 36;
+  const pts = conteineres.concat([plano.garagem]);
+  const lats = pts.map(p => p.latitude), lngs = pts.map(p => p.longitude);
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+  const x = p => margem + (p.longitude - minLng) / (maxLng - minLng) * (L - 2 * margem);
+  const y = p => A - margem - (p.latitude - minLat) / (maxLat - minLat) * (A - 2 * margem);
+
+  const ordem = plano.otimizada.ordem;
+  const numero = {};
+  ordem.forEach(o => numero[o.id_conteiner] = o.ordem);
+
+  let svg = "";
+  if (ordem.length) {
+    const caminho = [plano.garagem, ...ordem, plano.garagem].map(p => x(p) + "," + y(p)).join(" ");
+    svg += `<polyline points="${caminho}" fill="none" stroke="#1f5f7a" stroke-width="2" stroke-dasharray="6 4"/>`;
+  }
+  conteineres.forEach(c => {
+    const n = numero[c.id_conteiner];
+    svg += `<g><title>${c.endereco} - ${c.nivel.toFixed(0)}%</title>` +
+      `<circle cx="${x(c)}" cy="${y(c)}" r="${n ? 13 : 8}" fill="${n ? "#d4572a" : "#4f8f6b"}"/>` +
+      (n ? `<text x="${x(c)}" y="${y(c) + 4}" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">${n}</text>` : "") +
+      `</g>`;
+  });
+  svg += `<rect x="${x(plano.garagem) - 8}" y="${y(plano.garagem) - 8}" width="16" height="16" fill="#1c2a33"/>` +
+         `<text x="${x(plano.garagem) + 14}" y="${y(plano.garagem) + 4}" font-size="12" fill="#1c2a33">Garagem</text>`;
+  $("mapa").innerHTML = svg;
+}
+
+// ---- Tabela comparativa e lista da rota ----
+function desenharResumo() {
+  const f = plano.fixa, o = plano.otimizada;
+  $("resumo").innerHTML =
+    "<tr><th></th><th class='num'>Rota fixa</th><th class='num'>Otimizada</th></tr>" +
+    `<tr><td>Pontos visitados</td><td class="num">${f.pontos}</td><td class="num">${o.pontos}</td></tr>` +
+    `<tr><td>Distância (km)</td><td class="num">${f.km.toFixed(1)}</td><td class="num">${o.km.toFixed(1)}</td></tr>` +
+    `<tr><td>Combustível (L)</td><td class="num">${f.litros.toFixed(1)}</td><td class="num">${o.litros.toFixed(1)}</td></tr>` +
+    `<tr><td>Tempo estimado</td><td class="num">${formatarTempo(f.tempo_min)}</td><td class="num">${formatarTempo(o.tempo_min)}</td></tr>`;
+  $("economia").textContent = o.pontos
+    ? `Economia de ${plano.economia_km_pct}% na distância e ${plano.economia_litros.toFixed(1)} L de combustível por coleta.`
+    : "Nenhum contêiner chegou ao limite escolhido: não há coleta hoje.";
+}
+
+function desenharOrdem() {
+  const o = plano.otimizada.ordem;
+  $("ordem").innerHTML = o.length
+    ? o.map(i => `<li>${i.endereco} (${i.bairro}) - ${i.nivel.toFixed(0)}% cheio</li>`).join("")
+    : "<li>Sem pontos para coletar. Diminua o limite ou simule novas leituras.</li>";
+}
+
+function desenharConteineres() {
+  const limite = Number($("limite").value);
+  const ordenados = [...conteineres].sort((a, b) => b.nivel - a.nivel);
+  $("tabelaConteineres").innerHTML =
+    "<tr><th>Contêiner</th><th>Endereço</th><th>Bairro</th><th>Tipo</th><th>Nível</th><th>Última leitura</th></tr>" +
+    ordenados.map(c => `<tr><td>#${c.id_conteiner}</td><td>${c.endereco}</td><td>${c.bairro}</td><td>${c.tipo}</td>
+      <td><span class="barra"><b class="${c.nivel >= limite ? "cheio" : ""}" style="width:${c.nivel}%"></b></span> ${c.nivel.toFixed(0)}%</td>
+      <td>${c.lido_em}</td></tr>`).join("");
+}
+
+// ---- Botões ----
+$("limite").addEventListener("input", () => atualizar().catch(e => aviso(e.message, true)));
+
+$("btnSimular").addEventListener("click", async () => {
+  try {
+    await api("/api/simular", { method: "POST", body: "{}" });
+    aviso("Novas leituras recebidas dos sensores.");
+    await atualizar();
+  } catch (e) { aviso(e.message, true); }
+});
+
+$("btnExecutar").addEventListener("click", async () => {
+  try {
+    const r = await api("/api/executar", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limite: Number($("limite").value) }),
+    });
+    aviso(`Rota registrada: ${r.pontos} pontos, ${r.km.toFixed(1)} km, ${r.litros.toFixed(1)} L. Contêineres esvaziados.`);
+    await atualizar();
+    await carregarHistorico();
+  } catch (e) { aviso(e.message, true); }
+});
+
+atualizar().then(carregarHistorico).catch(e => aviso(e.message, true));
+</script>
+</body>
+</html>
